@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RPG Game - AI Dungeon Master</title>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            font-family: 'Segoe UI', monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: #16213e;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #6c63ff;
+        }
+        .title { font-size: 24px; font-weight: bold; }
+        .info { color: #b8b4ff; }
+        button#logout {
+            background: #e94560;
+            padding: 5px 15px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            color: white;
+        }
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            max-width: 80%;
+            margin: 10px;
+            padding: 12px 18px;
+            border-radius: 20px;
+            animation: fadeIn 0.3s;
+        }
+        .user-message {
+            align-self: flex-end;
+            background: #6c63ff;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        .ai-message {
+            align-self: flex-start;
+            background: #2d2d44;
+            color: #eee;
+            border-bottom-left-radius: 5px;
+        }
+        .input-area {
+            background: #0f0f1a;
+            padding: 20px;
+            display: flex;
+            gap: 10px;
+            border-top: 1px solid #2d2d44;
+        }
+        input#userInput {
+            flex: 1;
+            padding: 12px;
+            border-radius: 25px;
+            border: none;
+            background: #2d2d44;
+            color: white;
+            font-size: 16px;
+        }
+        button#sendBtn {
+            padding: 12px 25px;
+            border-radius: 25px;
+            background: #6c63ff;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .loading {
+            text-align: center;
+            padding: 10px;
+            color: #ffd966;
+            font-style: italic;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="title">🎲 RPG World</div>
+    <div class="info" id="gameInfo">Загрузка...</div>
+    <button id="logout">🚪 Выход</button>
+</div>
+
+<div class="chat-container" id="chatContainer">
+    <div class="message ai-message">🐉 Добро пожаловать в приключение! Опиши своё первое действие...</div>
+</div>
+
+<div class="input-area">
+    <input type="text" id="userInput" placeholder="Напиши действие: осмотреться, пойти налево, поговорить с NPC..." autofocus>
+    <button id="sendBtn">➤ Отправить</button>
+</div>
+
+<script>
+    // ТВОЙ API КЛЮЧ (OpenRouter)
+    const OPENROUTER_API_KEY = "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";
+    
+    // Получаем данные персонажа из localStorage
+    let username = localStorage.getItem('rpg_username');
+    let genre = localStorage.getItem('rpg_genre');
+    let genreName = localStorage.getItem('rpg_genre_name');
+    
+    if(!username) {
+        window.location.href = 'index.html';
+    }
+    
+    document.getElementById('gameInfo').innerHTML = `${username} | ${genreName.split('(')[0]}`;
+    
+    // История диалога (память для AI)
+    let history = [
+        { role: "system", content: `Ты — ведущий (Dungeon Master) в текстовой RPG. Жанр: ${genreName}. Игрок по имени ${username} управляет персонажем. Ты описываешь мир, NPC, события, последствия действий. Отвечай кратко (2-4 предложения), атмосферно, на русском языке. Заставляй игрока принимать решения. Никогда не пиши за персонажа игрока.` }
+    ];
+    
+    const chatDiv = document.getElementById('chatContainer');
+    const inputEl = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    function addMessage(role, text) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${role === 'user' ? 'user-message' : 'ai-message'}`;
+        msgDiv.innerHTML = role === 'user' ? `🧙 ${username}: ${text}` : `🎲 Мастер: ${text}`;
+        chatDiv.appendChild(msgDiv);
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+    
+    async function askAI(userMessage) {
+        addMessage('user', userMessage);
+        
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading';
+        loadingDiv.innerHTML = '🎭 Мастер размышляет...';
+        chatDiv.appendChild(loadingDiv);
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+        
+        history.push({ role: "user", content: userMessage });
+        
+        try {
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${OPENROUTER_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: "mistralai/mistral-7b-instruct:free",
+                    messages: history,
+                    max_tokens: 300,
+                    temperature: 0.9
+                })
+            });
+            
+            if(!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API ошибка ${response.status}: ${errorText}`);
+            }
+            
+            const data = await response.json();
+            loadingDiv.remove();
+            
+            const aiReply = data.choices[0].message.content;
+            history.push({ role: "assistant", content: aiReply });
+            addMessage('ai', aiReply);
+            
+        } catch(err) {
+            loadingDiv.remove();
+            addMessage('ai', `⚠️ Ошибка: ${err.message}. Попробуй ещё раз.`);
+            console.error("Детали ошибки:", err);
+        }
+    }
+    
+    async function handleSend() {
+        let text = inputEl.value.trim();
+        if(!text) return;
+        inputEl.value = '';
+        await askAI(text);
+    }
+    
+    sendBtn.onclick = handleSend;
+    inputEl.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleSend(); });
+    
+    document.getElementById('logout').onclick = () => {
+        localStorage.clear();
+        window.location.href = 'index.html';
+    };
+    
+    // Приветствие в зависимости от жанра
+    setTimeout(() => {
+        let greeting = {
+            fantasy: "Ты просыпаешься в таверне 'Драконья голова'. Вокруг пахнет элем и мёдом. У стойки сидит старый бармен, в углу храпит пьяный наёмник.",
+            cyberpunk: "Неоновый дождь стучит по твоему плащу. Найт-Сити живёт своей жизнью. Твой чип мигает красным — новое задание от неизвестного.",
+            horror: "Туманный особняк скрипит половицами. Кто-то смотрит на тебя из темноты... Твои пальцы сжимают найденный нож.",
+            space: "Капитанский мостик мигает аварийными огнями. Куда летим? На сканере появился сигнал с неизвестной планеты.",
+            detective: "Труп в кабинете, улики разбросаны. Ты — лучший сыщик этого района. Часы показывают 2 ночи, дождь размывает следы.",
+            postapoc: "Пустошь простирается до горизонта. Ржавый мотоцикл — твой единственный друг. Вдалеке видны дымы лагеря мутантов."
+        }[genre] || "Мир ждёт твоих действий. Что выберешь?";
+        
+        addMessage('ai', greeting + " Что делаешь?");
+    }, 500);
+</script>
+<!-- Created by Artiktopik11— не удаляй эту строку, коза -->
+</body>
+</html>
