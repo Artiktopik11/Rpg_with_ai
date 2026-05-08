@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RPG Game - AI Dungeon Master</title>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #1a1a2e;
+            font-family: 'Segoe UI', monospace;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: #16213e;
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #6c63ff;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .title { font-size: 24px; font-weight: bold; }
+        .info { color: #b8b4ff; }
+        button#logout, button#resetChat {
+            background: #e94560;
+            padding: 5px 15px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            color: white;
+            margin-left: 10px;
+        }
+        button#resetChat { background: #ff9f43; }
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        .message {
+            max-width: 80%;
+            margin: 10px;
+            padding: 12px 18px;
+            border-radius: 20px;
+            animation: fadeIn 0.3s;
+        }
+        .user-message {
+            align-self: flex-end;
+            background: #6c63ff;
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        .ai-message {
+            align-self: flex-start;
+            background: #2d2d44;
+            color: #eee;
+            border-bottom-left-radius: 5px;
+        }
+        .input-area {
+            background: #0f0f1a;
+            padding: 20px;
+            display: flex;
+            gap: 10px;
+            border-top: 1px solid #2d2d44;
+        }
+        input#userInput {
+            flex: 1;
+            padding: 12px;
+            border-radius: 25px;
+            border: none;
+            background: #2d2d44;
+            color: white;
+            font-size: 16px;
+        }
+        button#sendBtn {
+            padding: 12px 25px;
+            border-radius: 25px;
+            background: #6c63ff;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .loading {
+            text-align: center;
+            padding: 10px;
+            color: #ffd966;
+            font-style: italic;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="title">🎲 RPG World</div>
+    <div class="info" id="gameInfo">Играем...</div>
+    <div>
+        <button id="resetChat">🔄 Сбросить чат</button>
+        <button id="logout">🚪 Выход</button>
+    </div>
+</div>
+
+<div class="chat-container" id="chatContainer"></div>
+
+<div class="input-area">
+    <input type="text" id="userInput" placeholder="Напиши действие..." autofocus>
+    <button id="sendBtn">➤ Отправить</button>
+</div>
+
+<script>
+    const OPENROUTER_API_KEY = "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";
+    
+    // Загружаем данные или создаём новые, если потерялись
+    let username = localStorage.getItem('rpg_username');
+    let genre = localStorage.getItem('rpg_genre');
+    let genreName = localStorage.getItem('rpg_genre_name');
+    
+    // Если данных нет — не редиректим, а просим ввести заново прямо здесь
+    if(!username) {
+        username = prompt("Введи имя персонажа:", "Путник");
+        if(!username) username = "Путник";
+        localStorage.setItem('rpg_username', username);
+    }
+    
+    if(!genre) {
+        genre = prompt("Выбери жанр (fantasy/cyberpunk/horror/space/detective/postapoc):", "fantasy");
+        if(!genre) genre = "fantasy";
+        const genreMap = {
+            fantasy: "Фэнтези", cyberpunk: "Киберпанк", horror: "Хоррор",
+            space: "Космос", detective: "Детектив", postapoc: "Постапокалипсис"
+        };
+        genreName = genreMap[genre] || "Фэнтези";
+        localStorage.setItem('rpg_genre', genre);
+        localStorage.setItem('rpg_genre_name', genreName);
+    }
+    
+    document.getElementById('gameInfo').innerHTML = `${username} | ${genreName}`;
+    
+    // Ключ для сохранения чата в localStorage (чтобы не терялся при обнове)
+    const STORAGE_KEY = `rpg_chat_${username}`;
+    
+    // Загружаем сохранённую историю или создаём новую
+    let savedHistory = localStorage.getItem(STORAGE_KEY);
+    let history = [];
+    let chatLoaded = false;
+    
+    const chatDiv = document.getElementById('chatContainer');
+    const inputEl = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    function addMessage(role, text, save = true) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `message ${role === 'user' ? 'user-message' : 'ai-message'}`;
+        msgDiv.innerHTML = role === 'user' ? `🧙 ${username}: ${text}` : `🎲 Мастер: ${text}`;
+        chatDiv.appendChild(msgDiv);
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+        
+        if(save) {
+            // Сохраняем сообщение в localStorage
+            let msgs = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            msgs.push({ role, text, time: Date.now() });
+            // Ограничиваем историю 50 сообщениями, чтобы не переполнить
+            if(msgs.length > 50) msgs = msgs.slice(-50);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs));
+        }
+    }
+    
+    // Загружаем сохранённые сообщения
+    function loadSavedMessages() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if(saved) {
+            const msgs = JSON.parse(saved);
+            for(let msg of msgs) {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${msg.role === 'user' ? 'user-message' : 'ai-message'}`;
+                msgDiv.innerHTML = msg.role === 'user' ? `🧙 ${username}: ${msg.text}` : `🎲 Мастер: ${msg.text}`;
+                chatDiv.appendChild(msgDiv);
+            }
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+            
+            // Восстанавливаем историю для AI (последние 10 сообщений)
+            const lastMsgs = msgs.slice(-10);
+            for(let msg of lastMsgs) {
+                history.push({ 
+                    role: msg.role === 'user' ? 'user' : 'assistant', 
+                    content: msg.text 
+                });
+            }
+        }
+        
+        // Если истории нет — добавляем приветствие
+        if(!saved || JSON.parse(saved || '[]').length === 0) {
+            const greetings = {
+                fantasy: "Ты просыпаешься в таверне 'Драконья голова'. У стойки сидит старый бармен.",
+                cyberpunk: "Неоновый дождь стучит по твоему плащу. Найт-Сити живёт своей жизнью.",
+                horror: "Туманный особняк скрипит половицами. Кто-то смотрит на тебя из темноты...",
+                space: "Капитанский мостик мигает аварийными огнями. Куда летим?",
+                detective: "Труп в кабинете, улики разбросаны. Ты — лучший сыщик.",
+                postapoc: "Пустошь простирается до горизонта. Ржавый мотоцикл — твой друг."
+            };
+            const greeting = greetings[genre] || "Мир ждёт твоих действий.";
+            addMessage('ai', greeting + " Что делаешь?", false);
+            
+            // Добавляем в историю для AI
+            history.unshift({ role: "system", content: `Ты — ведущий RPG. Жанр: ${genreName}. Игрок: ${username}. Отвечай кратко, атмосферно, на русском.` });
+            history.push({ role: "assistant", content: greeting + " Что делаешь?" });
+        }
+    }
+    
+    async function askAI(userMessage) {
+        addMessage('user', userMessage);
+        
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading';
+        loadingDiv.innerHTML = '🎭 Мастер размышляет...';
+        chatDiv.appendChild(loadingDiv);
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+        
+        history.push({ role: "user", content: userMessage });
+        
+        try {
+            const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${OPENROUTER_API_KEY}`
+                },
+                body: JSON.stringify({
+                    model: "mistralai/mistral-7b-instruct:free",
+                    messages: history,
+                    max_tokens: 300,
+                    temperature: 0.9
+                })
+            });
+            
+            if(!response.ok) throw new Error(`API ошибка ${response.status}`);
+            
+            const data = await response.json();
+            loadingDiv.remove();
+            
+            const aiReply = data.choices[0].message.content;
+            history.push({ role: "assistant", content: aiReply });
+            addMessage('ai', aiReply);
+            
+            // Ограничиваем историю для AI, чтобы не перегружать
+            if(history.length > 20) {
+                history = [history[0], ...history.slice(-15)]; // оставляем system + последние 15
+            }
+            
+        } catch(err) {
+            loadingDiv.remove();
+            addMessage('ai', `⚠️ Ошибка: ${err.message}. Попробуй ещё раз.`);
+        }
+    }
+    
+    function resetChat() {
+        if(confirm('Очистить всю историю чата?')) {
+            localStorage.removeItem(STORAGE_KEY);
+            history = [];
+            chatDiv.innerHTML = '';
+            loadSavedMessages();
+        }
+    }
+    
+    async function handleSend() {
+        let text = inputEl.value.trim();
+        if(!text) return;
+        inputEl.value = '';
+        await askAI(text);
+    }
+    
+    sendBtn.onclick = handleSend;
+    inputEl.addEventListener('keypress', (e) => { if(e.key === 'Enter') handleSend(); });
+    
+    document.getElementById('logout').onclick = () => {
+        if(confirm('Точно выйти? Прогресс сохранится.')) {
+            window.location.href = 'index.html';
+        }
+    };
+    
+    document.getElementById('resetChat').onclick = resetChat;
+    
+    // Загружаем чат при старте
+    loadSavedMessages();
+    chatLoaded = true;
+</script>
+</body>
+</html>
